@@ -26,6 +26,11 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
     const handLandmarkerRef = useRef<HandLandmarker | null>(null);
     const animationFrameId = useRef<number>(0);
     
+    // Performance Monitor Refs
+    const fpsRef = useRef<HTMLDivElement>(null);
+    const frameCountRef = useRef(0);
+    const lastFpsTimeRef = useRef(0);
+    
     // Logic Refs (Mutable state for animation loop)
     const templateRef = useRef(template);
     const colorRef = useRef(color);
@@ -187,10 +192,21 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
     // Main Animation Loop
     const animate = useCallback(() => {
         const time = Date.now() * 0.001;
+        const now = performance.now();
+
+        // FPS Calculation
+        frameCountRef.current++;
+        if (now - lastFpsTimeRef.current >= 1000) {
+            if (fpsRef.current) {
+                fpsRef.current.innerText = `${frameCountRef.current} FPS`;
+            }
+            frameCountRef.current = 0;
+            lastFpsTimeRef.current = now;
+        }
         
         // 1. Hand Detection Logic
         if (videoRef.current && handLandmarkerRef.current && videoRef.current.readyState >= 3) {
-            const results = handLandmarkerRef.current.detectForVideo(videoRef.current, performance.now());
+            const results = handLandmarkerRef.current.detectForVideo(videoRef.current, now);
             
             if (results.landmarks && results.landmarks.length > 0) {
                 setHandsDetected(true);
@@ -459,13 +475,19 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
                 </div>
             )}
 
-            {/* Status Indicator */}
-            {!loading && handsDetected && (
-                <div className="absolute top-6 left-6 flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full backdrop-blur-md">
-                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                    <span className="text-green-300 text-xs font-medium tracking-wide">HANDS CONNECTED</span>
+            {/* Status Indicators */}
+            <div className="absolute top-6 left-6 flex flex-col gap-2">
+                {!loading && handsDetected && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full backdrop-blur-md">
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span className="text-green-300 text-xs font-medium tracking-wide">HANDS CONNECTED</span>
+                    </div>
+                )}
+                {/* FPS Counter */}
+                <div ref={fpsRef} className="flex items-center gap-2 px-4 py-1.5 bg-black/40 border border-white/10 rounded-lg backdrop-blur-sm self-start">
+                     <span className="text-gray-400 text-[10px] font-mono tracking-wider">0 FPS</span>
                 </div>
-            )}
+            </div>
         </div>
     );
 };
