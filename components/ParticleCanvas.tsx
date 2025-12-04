@@ -30,6 +30,7 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
     const templateRef = useRef(template);
     const colorRef = useRef(color);
     const fireworksData = useRef<FireworkParticle[]>([]);
+    const velocitiesRef = useRef<Float32Array | null>(null);
     const prevHandsClosedRef = useRef<boolean>(false);
     const isTransitioningRef = useRef<boolean>(false);
     
@@ -70,10 +71,18 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
         });
     }, []);
 
+    const resetVelocities = () => {
+        if (velocitiesRef.current) {
+            velocitiesRef.current.fill(0);
+        }
+    };
+
     const triggerExplosion = useCallback(() => {
         if (!particlesRef.current || templateRef.current === ParticleTemplate.Fireworks || isTransitioningRef.current) return;
 
         isTransitioningRef.current = true;
+        resetVelocities(); // clear physics momentum
+
         const geometry = particlesRef.current.geometry;
         const positions = geometry.attributes.position.array as Float32Array;
         const initialPositions = geometry.attributes.initialPosition.array as Float32Array;
@@ -120,6 +129,7 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
         explosionTweenRef.current = animateAttribute(positions, explodedPositions, 0.25, "power3.out", () => {
             explosionTweenRef.current = animateAttribute(explodedPositions, initialPositions, 1.2, "elastic.out(1, 0.4)", () => {
                 isTransitioningRef.current = false;
+                resetVelocities(); // Ensure clean slate for physics
             });
         });
 
@@ -133,7 +143,6 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
             // Reset to fireworks mode
             fireworksData.current = createFireworks();
             isTransitioningRef.current = false;
-            // Fireworks are handled in animate loop, just ensure geometry exists
         } else {
             // Generate Target Points
             const pointGenerator = {
@@ -150,7 +159,7 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
                 const geometry = particlesRef.current.geometry;
                 const currentPositions = geometry.attributes.position.array as Float32Array;
                 
-                // Update 'initialPosition' for drift logic
+                // Update 'initialPosition' target
                 geometry.setAttribute('initialPosition', new THREE.BufferAttribute(newPoints.slice(), 3));
 
                 // Cleanup active tweens
@@ -158,8 +167,11 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
                 if (morphTweenRef.current) morphTweenRef.current.kill();
 
                 isTransitioningRef.current = true;
+                resetVelocities();
+
                 morphTweenRef.current = animateAttribute(currentPositions, newPoints, 1.5, "power2.inOut", () => {
                     isTransitioningRef.current = false;
+                    resetVelocities();
                 });
             }
         }
@@ -229,7 +241,7 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
             const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
             
             if (templateRef.current === ParticleTemplate.Fireworks) {
-                // Fireworks Physics
+                // Fireworks Physics (Unchanged)
                 const gravity = -0.015;
                 let allDead = true;
                 
@@ -253,17 +265,46 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
                 }
                 particlesRef.current.geometry.attributes.position.needsUpdate = true;
 
-            } else if (!isTransitioningRef.current) {
-                // Ambient Drift (Sine Wave)
+            } else if (!isTransitioningRef.current && velocitiesRef.current) {
+                // REALISTIC PHYSICS SIMULATION
+                // Spring force + Gravity + Air Resistance
+                
                 const initialPositions = particlesRef.current.geometry.attributes.initialPosition.array as Float32Array;
-                for (let i = 0; i < positions.length; i += 3) {
-                    const ix = initialPositions[i];
-                    const iy = initialPositions[i+1];
-                    const iz = initialPositions[i+2];
+                const vels = velocitiesRef.current;
+                const count = positions.length / 3;
 
-                    positions[i] = ix + Math.sin(time + iy * 0.5) * 0.15;
-                    positions[i+1] = iy + Math.cos(time + ix * 0.5) * 0.15;
-                    positions[i+2] = iz + Math.sin(time + iz * 0.5) * 0.15;
+                const springStrength = 0.08; // How strongly it pulls back to shape
+                const damping = 0.92; // Air resistance (lower = thicker air)
+                const gravity = -0.005; // Gentle downward pull
+                
+                for (let i = 0; i < count; i++) {
+                    const idx = i * 3;
+                    
+                    // 1. Dynamic Target: Original Shape + Subtle Sine Drift
+                    // This creates the "underwater/floating" feel but anchored to the shape
+                    const ix = initialPositions[idx];
+                    const iy = initialPositions[idx+1];
+                    const iz = initialPositions[idx+2];
+
+                    const tx = ix + Math.sin(time + iy * 0.4) * 0.2;
+                    const ty = iy + Math.cos(time * 0.9 + ix * 0.4) * 0.2;
+                    const tz = iz + Math.sin(time * 0.8 + iz * 0.4) * 0.2;
+
+                    // 2. Calculate Forces
+                    // Hooke's Law (Spring)
+                    const forceX = (tx - positions[idx]) * springStrength;
+                    const forceY = (ty - positions[idx]) * springStrength + gravity; // Apply gravity
+                    const forceZ = (tz - positions[idx]) * springStrength;
+
+                    // 3. Integrate Velocity (Acceleration + Friction)
+                    vels[idx]   = (vels[idx]   + forceX) * damping;
+                    vels[idx+1] = (vels[idx+1] + forceY) * damping;
+                    vels[idx+2] = (vels[idx+2] + forceZ) * damping;
+
+                    // 4. Update Position
+                    positions[idx]   += vels[idx];
+                    positions[idx+1] += vels[idx+1];
+                    positions[idx+2] += vels[idx+2];
                 }
                 particlesRef.current.geometry.attributes.position.needsUpdate = true;
             }
@@ -305,6 +346,10 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(initialPoints, 3));
         geometry.setAttribute('initialPosition', new THREE.BufferAttribute(initialPoints.slice(), 3));
+
+        // Initialize Velocities Buffer for Physics
+        const particleCount = initialPoints.length / 3;
+        velocitiesRef.current = new Float32Array(particleCount * 3);
 
         const material = new THREE.PointsMaterial({
             color: colorRef.current,
