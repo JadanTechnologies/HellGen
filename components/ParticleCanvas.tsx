@@ -203,31 +203,39 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
                     const h2 = hands[1][9];
                     const dist = Math.hypot(h1.x - h2.x, h1.y - h2.y);
                     
-                    const targetScale = THREE.MathUtils.mapLinear(dist, 0.2, 0.8, 0.5, 2.5);
-                    const clampedScale = THREE.MathUtils.clamp(targetScale, 0.5, 3.0);
+                    // Adjusted mapping: [0.1, 0.6] enables easier full expansion
+                    const targetScale = THREE.MathUtils.mapLinear(dist, 0.1, 0.6, 0.5, 3.0);
+                    const clampedScale = THREE.MathUtils.clamp(targetScale, 0.5, 3.5);
                     
+                    // Reduced duration to 0.2s for snappier, more fluid response
                     gsap.to(particlesRef.current.scale, {
                         x: clampedScale, y: clampedScale, z: clampedScale,
-                        duration: 0.3, overwrite: 'auto'
+                        duration: 0.2, overwrite: 'auto'
                     });
 
                     // Logic: Closing hands gesture
                     const isClosed = (lm: NormalizedLandmark[]) => {
                         const wrist = lm[0];
-                        const middleTip = lm[12];
-                        const ringTip = lm[16];
-                        const mcp = lm[9]; // Middle finger knuckle (palm base)
-
+                        const mcp = lm[9]; // Middle finger knuckle (palm base reference)
+                        
+                        // Hand size reference (Wrist to Middle Knuckle)
                         const handSize = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
-                        const middleDist = Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y);
-                        const ringDist = Math.hypot(ringTip.x - wrist.x, ringTip.y - wrist.y);
+                        
+                        // Check Index(8), Middle(12), Ring(16), Pinky(20)
+                        const tips = [8, 12, 16, 20];
+                        let closedFingers = 0;
+                        
+                        tips.forEach(idx => {
+                            const tip = lm[idx];
+                            const tipDist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                            // Threshold increased to 1.6: easier to trigger early
+                            if (tipDist < handSize * 1.6) {
+                                closedFingers++;
+                            }
+                        });
 
-                        // Improved Heuristic:
-                        // Open hand: Tip-Wrist approx 2.0 * HandSize
-                        // Closed hand: Tip-Wrist approx 1.0 * HandSize
-                        // Threshold 1.4 allows for a slightly relaxed fist to still trigger, making it more sensitive.
-                        // Checking both Middle and Ring fingers avoids false positives from a single finger movement.
-                        return middleDist < handSize * 1.4 && ringDist < handSize * 1.4;
+                        // Require at least 3 fingers closed to confirm fist (avoids pointing/peace signs)
+                        return closedFingers >= 3;
                     };
 
                     const bothClosed = isClosed(hands[0]) && isClosed(hands[1]);
