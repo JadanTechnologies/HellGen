@@ -213,12 +213,21 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
 
                     // Logic: Closing hands gesture
                     const isClosed = (lm: NormalizedLandmark[]) => {
-                        const tip = lm[12]; // Middle finger tip
                         const wrist = lm[0];
-                        const palm = lm[9];
-                        const tipDist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-                        const palmDist = Math.hypot(palm.x - wrist.x, palm.y - wrist.y);
-                        return tipDist < palmDist * 1.5; // Heuristic
+                        const middleTip = lm[12];
+                        const ringTip = lm[16];
+                        const mcp = lm[9]; // Middle finger knuckle (palm base)
+
+                        const handSize = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
+                        const middleDist = Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y);
+                        const ringDist = Math.hypot(ringTip.x - wrist.x, ringTip.y - wrist.y);
+
+                        // Improved Heuristic:
+                        // Open hand: Tip-Wrist approx 2.0 * HandSize
+                        // Closed hand: Tip-Wrist approx 1.0 * HandSize
+                        // Threshold 1.4 allows for a slightly relaxed fist to still trigger, making it more sensitive.
+                        // Checking both Middle and Ring fingers avoids false positives from a single finger movement.
+                        return middleDist < handSize * 1.4 && ringDist < handSize * 1.4;
                     };
 
                     const bothClosed = isClosed(hands[0]) && isClosed(hands[1]);
@@ -241,7 +250,7 @@ const ParticleCanvas: React.FC<ParticleCanvasProps> = ({ template, color }) => {
             const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
             
             if (templateRef.current === ParticleTemplate.Fireworks) {
-                // Fireworks Physics (Unchanged)
+                // Fireworks Physics
                 const gravity = -0.015;
                 let allDead = true;
                 
